@@ -163,6 +163,18 @@ def get_date_range(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/benchmarks")
+def get_benchmarks(
+    crop: str = Query(..., description="Crop Name"),
+    soil: str = Query(..., description="Soil Type"),
+    categories: Optional[str] = Query(None, description="Comma separated categories filter"),
+):
+    try:
+        return data_processing.get_age_benchmarks(crop, soil, categories)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

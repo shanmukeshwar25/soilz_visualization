@@ -69,3 +69,16 @@ export const getPlantTrajectory = async (crop, soil) => {
   // Returns { data: [...], plant_categories_used: [...] }
   return response.data;
 };
+
+export const getBenchmarks = async (crop, soil, categories = null) => {
+  const params = { crop, soil };
+  if (categories && categories.length > 0) {
+    if (Array.isArray(categories)) {
+      params.categories = categories.join(',');
+    } else if (categories !== 'All') {
+      params.categories = categories;
+    }
+  }
+  const response = await axios.get(`${API_BASE_URL}/benchmarks`, { params });
+  return response.data;
+};
