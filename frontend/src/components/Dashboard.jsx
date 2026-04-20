@@ -211,10 +211,20 @@ function CategoryBlock({ categoryName, categoryType = 'mixed', categoryData = []
 
   function buildMeasuresByUnit(sd) {
     const g = {};
-    sd.forEach((s) => { const u = s.unit || 'Unknown'; if (!g[u]) g[u] = []; g[u].push(s); });
+    sd.forEach((s) => {
+      const u = (s.unit || '').trim();
+      const key = u === '' || u.toLowerCase() === 'unknown' ? 'Unit' : u;
+      if (!g[key]) g[key] = [];
+      g[key].push(s);
+    });
     return g;
   }
   const measuresByUnit = useMemo(() => buildMeasuresByUnit(visibleSummaryData), [visibleSummaryData]);
+
+  const presentAge = useMemo(() => {
+    if (!filteredChartData.length) return null;
+    return Math.max(...filteredChartData.map(d => d.ageDays || 0));
+  }, [filteredChartData]);
 
   // Plot Renderer
   function renderPlot(unit, measures, data) {
@@ -293,6 +303,14 @@ function CategoryBlock({ categoryName, categoryType = 'mixed', categoryData = []
       <div className="sticky top-[93px] z-30 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700 px-6 md:px-8 py-3 flex items-center gap-3 shadow-sm rounded-t-3xl overflow-hidden">
         <span className={`w-3.5 h-3.5 rounded-full flex-shrink-0 ${stickyDotColor}`} />
         <span className="text-xl font-black text-slate-800 dark:text-slate-100 truncate flex-1 tracking-tight">{categoryName}</span>
+        
+        {presentAge !== null && (
+          <div className="flex items-center gap-2 bg-indigo-50 dark:bg-indigo-900/30 px-3 py-1.5 rounded-xl border border-indigo-100 dark:border-indigo-800 shrink-0 shadow-sm">
+            <TrendingUp className="w-3.5 h-3.5 text-indigo-500" />
+            <span className="text-[11px] font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-widest">Age: {presentAge} Days</span>
+          </div>
+        )}
+
         <span className={`shrink-0 text-[10px] font-black uppercase tracking-widest px-3 py-1.5 rounded-full border ${stickyPillStyle}`}>
           {categoryType === 'plant' ? 'Plant' : categoryType === 'soil' ? 'Soil' : 'Mixed'} Analysis
         </span>

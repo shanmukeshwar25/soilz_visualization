@@ -56,6 +56,32 @@ MIXED_CATEGORIES = {
     'Aaltjes zonder incubatie + Cysten'
 }
 
+# Mapping of measures to correct units when they are missing from the dataset
+UNIT_MAPPING = {
+    'Ph-KCL': 'pH',
+    'pH H2o (water)': 'pH',
+    'Fosfaat Pw': 'mg/l',
+    'Fosfaat P-AL': 'mg/100g',
+    'Fosfaat (P-CaCl2)': 'mg/kg',
+    'K-HCL': 'mg/100g',
+    'K-getal': 'index',
+    'C/N-verhouding': 'ratio',
+    'Klei-Humuscomplex, CEC': 'cmol+/kg',
+    'Kalium (K-CaCl2)': 'mg/kg',
+    'Magnesium (Mg-CaCL2)': 'mg/kg',
+    'Natrium (Na-CL2)': 'mg/kg',
+    'Calcium': 'mg/kg',
+    'Geleidbaarheid EC': 'mS/cm',
+    'Brix-waarde bepaling': '°Brix',
+    'Drogestof onderzoek plant': '%',
+    'Drogestof onderzoek plant compleet': '%',
+    'Organische stof': '%',
+    'Koolstof (C)': '%',
+    'pH': 'pH',
+    'Bicarbonaat': 'mmol/l',
+    'E. Coli': 'kve/100ml',
+}
+
 def classify_category(cat: str) -> str:
     """Returns 'soil', 'plant', or 'mixed' for a category string."""
     if cat in SOIL_CATEGORIES:
@@ -143,6 +169,17 @@ def load_and_clean_data(csv_path: str) -> pd.DataFrame:
     df['CropStartDate'] = df['CropStartDate'].dt.strftime('%Y-%m-%d').fillna('Unknown')
     df['CropEndDate'] = df['CropEndDate'].dt.strftime('%Y-%m-%d').fillna('Unknown')
     df['days_from_start'] = df['days_from_start'].fillna(-999)
+
+    # Standardize units and apply mapping for missing units
+    def clean_unit(row):
+        u = str(row['UnitS']).strip()
+        if u.lower() in ['nan', '', 'unknown', 'none']:
+            # Try to map based on measure
+            m = row['Measure']
+            return UNIT_MAPPING.get(m, 'Unknown')
+        return u
+
+    df['UnitS'] = df.apply(clean_unit, axis=1)
 
     # Compute HasPlantData / HasSoilData flags before aggregation
     df['HasPlantData'] = df['Crop'].notna().astype(int)
@@ -281,11 +318,10 @@ def get_summary_stats(crop: str, soil: str, categories: str = None, cat_type: st
         max_val  = float(group['ValueS'].max())
         
         # Determine actual unit, fall back to empty string if missing
-        unit_val = 'Unknown'
+        unit_val = ''
         if 'UnitS' in group.columns and not group['UnitS'].empty:
             unit_val = str(group['UnitS'].iloc[0]).strip()
-            # Clean weird units
-            if unit_val.lower() == 'nan':
+            if unit_val.lower() in ['nan', 'unknown']:
                 unit_val = ''
 
         summary.append({
