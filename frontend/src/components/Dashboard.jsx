@@ -223,8 +223,33 @@ function CategoryBlock({ categoryName, categoryType = 'mixed', categoryData = []
 
   const presentAge = useMemo(() => {
     if (!filteredChartData.length) return null;
+    // Soil: never show an age badge — soil samples are not tied to a crop lifecycle.
+    if (categoryType === 'soil') return null;
+    // Mixed: use CropStartDate / CropEndDate from plant-side rows only.
+    // Soil-only rows in a mixed dataset don't carry these fields, so they are
+    // automatically excluded — result is purely the crop cultivation span.
+    if (categoryType === 'mixed') {
+      const starts = filteredChartData
+        .map(d => d.CropStartDate ? new Date(d.CropStartDate).getTime() : null)
+        .filter(t => t != null && !isNaN(t));
+      const ends = filteredChartData
+        .map(d => d.CropEndDate ? new Date(d.CropEndDate).getTime() : null)
+        .filter(t => t != null && !isNaN(t));
+      if (starts.length && ends.length) {
+        const days = Math.floor((Math.max(...ends) - Math.min(...starts)) / (1000 * 60 * 60 * 24));
+        return days > 0 ? days : null;
+      }
+      // Fallback: span between first and last actual sample dates (no crop metadata)
+      const ts = filteredChartData
+        .map(d => { const dp = parseDatePart(d.date); return dp ? new Date(dp).getTime() : null; })
+        .filter(t => t != null && !isNaN(t));
+      if (ts.length < 2) return null;
+      const days2 = Math.floor((Math.max(...ts) - Math.min(...ts)) / (1000 * 60 * 60 * 24));
+      return days2 > 0 ? days2 : null;
+    }
+    // Plant: max ageDays across filtered data (days from first sample in window).
     return Math.max(...filteredChartData.map(d => d.ageDays || 0));
-  }, [filteredChartData]);
+  }, [filteredChartData, categoryType]);
 
   // Plot Renderer
   function renderPlot(unit, measures, data) {
@@ -307,7 +332,9 @@ function CategoryBlock({ categoryName, categoryType = 'mixed', categoryData = []
         {presentAge !== null && (
           <div className="flex items-center gap-2 bg-indigo-50 dark:bg-indigo-900/30 px-3 py-1.5 rounded-xl border border-indigo-100 dark:border-indigo-800 shrink-0 shadow-sm">
             <TrendingUp className="w-3.5 h-3.5 text-indigo-500" />
-            <span className="text-[11px] font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-widest">Age: {presentAge} Days</span>
+            <span className="text-[11px] font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-widest">
+              Crop Age: {presentAge} Days
+            </span>
           </div>
         )}
 
