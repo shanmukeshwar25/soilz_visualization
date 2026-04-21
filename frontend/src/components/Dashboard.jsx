@@ -6,11 +6,11 @@ import {
 } from 'recharts';
 import {
   Leaf, Box, ArrowUpRight, ArrowDownRight,
-  PieChart as PieChartIcon, BarChart3,
+  PieChart as PieChartIcon, BarChart3, Building2,
   LineChart as LineChartIcon, LayoutDashboard, TrendingUp,
   Calendar, Moon, Sun, Tag, Search, CheckSquare, Square, ChevronDown
 } from 'lucide-react';
-import { getFilters, getTimeSeriesData, getSummaryStats, getDateRange, getAllCategories, getBenchmarks } from '../services/api';
+import { getFilters, getCompanies, getTimeSeriesData, getSummaryStats, getDateRange, getAllCategories, getBenchmarks } from '../services/api';
 
 // ─── colour palette ────────────────────────────────────────────────────────────
 const COLORS = [
@@ -121,7 +121,13 @@ function CustomTooltip({ active, payload, label, unit }) {
     <div className="bg-white dark:bg-slate-900 border border-slate-200 rounded-2xl shadow-[0_20px_40px_-8px_rgba(0,0,0,0.14)] p-5 min-w-[280px]">
       <div className="border-b border-slate-100 pb-3 mb-3">
         <h4 className="font-extrabold text-slate-800 dark:text-slate-200 text-[13px]">{ds}</h4>
-        {d.Crop && d.SoilType && <p className="text-[11px] font-black text-slate-400 mt-1.5 uppercase tracking-wider">{d.Crop} · {d.SoilType}</p>}
+        {(d.Crop || d.SoilType) && (
+          <p className="text-[11px] font-black text-slate-400 mt-1.5 uppercase tracking-wider">
+            Crop: <span className="text-slate-500/90">{d.Crop && !['/n', '\\n', '\\N'].includes(String(d.Crop).trim()) ? d.Crop : 'None'}</span>
+            {' '}·{' '}
+            Soil: <span className="text-slate-500/90">{d.SoilType && !['/n', '\\n', '\\N'].includes(String(d.SoilType).trim()) ? d.SoilType : 'None'}</span>
+          </p>
+        )}
         {d.CropStartDate && d.CropEndDate && (
           <div className="mt-1 flex items-center gap-1.5 font-bold text-[11px] text-slate-500 flex-wrap">
             <span className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded-md">Planted: {d.CropStartDate}</span>
@@ -155,15 +161,6 @@ function CategoryBlock({ categoryName, categoryType = 'mixed', categoryData = []
   const [batchSearch, setBatchSearch] = useState('');
   const [selectedCompositionDate, setSelectedCompositionDate] = useState('');
 
-  const sortedSummaryData = useMemo(() => [...categorySummary].sort((a, b) => b.latest - a.latest).filter(s => s.max > 0), [categorySummary]);
-
-  // Auto-select top parameters when category loads
-  useEffect(() => {
-    if (selectedMeasures.size === 0 && sortedSummaryData.length > 0) {
-      setSelectedMeasures(new Set(sortedSummaryData.slice(0, 6).map(s => s.measure)));
-    }
-  }, [sortedSummaryData, selectedMeasures.size]);
-
   const isSoilCategory = categoryType === 'soil';
 
   const filteredChartData = useMemo(() => {
@@ -192,12 +189,60 @@ function CategoryBlock({ categoryName, categoryType = 'mixed', categoryData = []
       });
       if (isSoilCategory) {
         res.sort((a, b) => new Date(parseDatePart(a.date)) - new Date(parseDatePart(b.date)));
+        // For soil: deduplicate by the full date+batch string to keep all distinct samples
+        const seenKeys = new Set();
+        res = res.filter(row => {
+          const key = row.date;  // includes batch ID — unique per sample
+          if (seenKeys.has(key)) return false;
+          seenKeys.add(key);
+          return true;
+        });
       } else {
         res.sort((a, b) => a.ageDays - b.ageDays);
+        // For plant/mixed: deduplicate by ageDays — keep first occurrence per unique day value
+        const seenDays = new Set();
+        res = res.filter(row => {
+          const key = row.ageDays;
+          if (seenDays.has(key)) return false;
+          seenDays.add(key);
+          return true;
+        });
       }
     }
     return res;
   }, [categoryData, selectedWindow, availableWindows, categoryType]);
+
+  const dynamicSummaryData = useMemo(() => {
+    if (selectedWindow === 'All') return categorySummary;
+    return categorySummary.map(stats => {
+      const measure = stats.measure;
+      const values = filteredChartData
+        .map(row => row[measure])
+        .filter(val => val != null);
+      if (values.length === 0) return { ...stats, max: 0, latest: 0 };
+      const latest = values[values.length - 1];
+      const max = Math.max(...values);
+      const min = Math.min(...values);
+      const sum = values.reduce((a, b) => a + Number(b), 0);
+      const mean = sum / values.length;
+      const sortedVals = [...values].sort((a, b) => a - b);
+      const mid = Math.floor(sortedVals.length / 2);
+      const median = sortedVals.length % 2 !== 0 ? sortedVals[mid] : (sortedVals[mid - 1] + sortedVals[mid]) / 2;
+      const trend = values.slice(-10);
+      return { ...stats, latest, max, min, average: mean, median, trend };
+    });
+  }, [categorySummary, filteredChartData, selectedWindow]);
+
+  const sortedSummaryData = useMemo(() => {
+    return [...dynamicSummaryData].sort((a, b) => b.latest - a.latest).filter(s => s.max > 0);
+  }, [dynamicSummaryData]);
+
+  // Auto-select top parameters when category loads
+  useEffect(() => {
+    if (selectedMeasures.size === 0 && sortedSummaryData.length > 0) {
+      setSelectedMeasures(new Set(sortedSummaryData.slice(0, 6).map(s => s.measure)));
+    }
+  }, [sortedSummaryData, selectedMeasures.size]);
 
   const visibleSummaryData = useMemo(() => {
     return sortedSummaryData.map((s, i) => ({
@@ -225,43 +270,46 @@ function CategoryBlock({ categoryName, categoryType = 'mixed', categoryData = []
     if (!filteredChartData.length) return null;
     // Soil: never show an age badge — soil samples are not tied to a crop lifecycle.
     if (categoryType === 'soil') return null;
-    // Mixed: use CropStartDate / CropEndDate from plant-side rows only.
-    // Soil-only rows in a mixed dataset don't carry these fields, so they are
-    // automatically excluded — result is purely the crop cultivation span.
-    if (categoryType === 'mixed') {
-      const starts = filteredChartData
-        .map(d => d.CropStartDate ? new Date(d.CropStartDate).getTime() : null)
-        .filter(t => t != null && !isNaN(t));
-      const ends = filteredChartData
-        .map(d => d.CropEndDate ? new Date(d.CropEndDate).getTime() : null)
-        .filter(t => t != null && !isNaN(t));
-      if (starts.length && ends.length) {
-        const days = Math.floor((Math.max(...ends) - Math.min(...starts)) / (1000 * 60 * 60 * 24));
-        return days > 0 ? days : null;
-      }
-      // Fallback: span between first and last actual sample dates (no crop metadata)
-      const ts = filteredChartData
-        .map(d => { const dp = parseDatePart(d.date); return dp ? new Date(dp).getTime() : null; })
-        .filter(t => t != null && !isNaN(t));
-      if (ts.length < 2) return null;
-      const days2 = Math.floor((Math.max(...ts) - Math.min(...ts)) / (1000 * 60 * 60 * 24));
-      return days2 > 0 ? days2 : null;
+    // Plant & Mixed: use days_from_start from the backend (CreatedDate - CropStartDate).
+    // This is the actual crop age at sampling time — NOT a span computed from the
+    // earliest CropStartDate to the latest CropEndDate across all rows (which
+    // incorrectly accumulates soil cycle data and produces inflated values like 557 days).
+    // We pick the maximum days_from_start of rows that have a valid crop start date.
+    const validDays = filteredChartData
+      .map(d => (d.days_from_start != null && d.days_from_start >= 0) ? d.days_from_start : null)
+      .filter(v => v != null);
+    if (validDays.length) {
+      const maxDay = Math.max(...validDays);
+      return maxDay >= 0 ? maxDay : null;
     }
-    // Plant: max ageDays across filtered data (days from first sample in window).
-    return Math.max(...filteredChartData.map(d => d.ageDays || 0));
+    // Fallback for plant: max ageDays (days from first sample in window)
+    if (categoryType === 'plant') {
+      return Math.max(...filteredChartData.map(d => d.ageDays || 0));
+    }
+    return null;
   }, [filteredChartData, categoryType]);
 
   // Plot Renderer
-  function renderPlot(unit, measures, data) {
+  // renderPlot: renders one chart for a given unit group.
+  // xMode: 'soil' = x-axis is dateLabel; 'plant' = x-axis is ageDays
+  function renderPlot(unit, measures, data, xMode = null) {
+    // If xMode not given explicitly, derive from categoryType
+    const useSoilX = xMode !== null ? xMode === 'soil' : isSoilCategory;
     let CC = LineChart;
     if (plotType === 'bar') CC = BarChart;
     if (plotType === 'area') CC = AreaChart;
     const gc = isDark ? '#334155' : '#E2E8F0', ac = isDark ? '#94a3b8' : '#475569', alc = isDark ? '#475569' : '#cbd5e1';
-    const fmtTick = v => { const n = Number(v); return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`; };
+    const fmtTick = v => {
+      const n = Number(v);
+      if (isNaN(n)) return `${v}`;
+      if (Math.abs(n) >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+      if (Math.abs(n) >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+      return `${n}`;
+    };
 
-    const xKey = isSoilCategory ? 'dateLabel' : 'ageDays';
-    const xLabel = isSoilCategory ? 'Sample Date' : 'Crop Age (Days from Start)';
-    const xTickFmt = isSoilCategory ? v => v : t => `Day ${t != null ? t : ''}`;
+    const xKey = useSoilX ? 'dateLabel' : 'ageDays';
+    const xLabel = useSoilX ? 'Sample Date' : 'Crop Age (Days from Start)';
+    const xTickFmt = useSoilX ? v => v : t => `Day ${t != null ? t : ''}`;
 
     const typePillStyle = categoryType === 'plant'
       ? 'bg-emerald-100 text-emerald-700 border-emerald-200'
@@ -276,7 +324,7 @@ function CategoryBlock({ categoryName, categoryType = 'mixed', categoryData = []
     });
 
     return (
-      <div key={unit} className="w-full border border-slate-200 dark:border-slate-700 rounded-2xl bg-white dark:bg-slate-900 mt-6 overflow-hidden shadow-sm">
+      <div key={`${unit}-${xMode}`} className="w-full border border-slate-200 dark:border-slate-700 rounded-2xl bg-white dark:bg-slate-900 mt-6 overflow-hidden shadow-sm">
         {/* ── Chart Header ── */}
         <div className="px-5 pt-4 pb-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/40">
           <div className="flex items-center gap-3 flex-wrap">
@@ -294,12 +342,12 @@ function CategoryBlock({ categoryName, categoryType = 'mixed', categoryData = []
         {/* ── Chart Body ── */}
         <div className="h-[420px] px-2 pt-3 pb-2">
           <ResponsiveContainer width="100%" height="100%">
-            <CC data={data} margin={{ top: 10, right: 20, left: -10, bottom: isSoilCategory ? 45 : 20 }}>
+            <CC data={data} margin={{ top: 10, right: 20, left: -10, bottom: useSoilX ? 45 : 20 }}>
               <CartesianGrid strokeDasharray="4 4" vertical={false} stroke={gc} />
               <XAxis dataKey={xKey}
                 tickFormatter={xTickFmt}
                 tick={{ fontSize: 11, fill: ac, fontWeight: 700 }} tickMargin={10} axisLine={{ stroke: alc, strokeWidth: 1.5 }} tickLine={false}
-                interval="preserveStartEnd" textAnchor={isSoilCategory ? 'end' : 'middle'} angle={isSoilCategory ? -30 : 0} height={isSoilCategory ? 60 : 45} />
+                interval="preserveStartEnd" textAnchor={useSoilX ? 'end' : 'middle'} angle={useSoilX ? -30 : 0} height={useSoilX ? 60 : 45} />
               <YAxis yAxisId="left" orientation="left"
                 tick={{ fontSize: 11, fill: ac, fontWeight: 700 }} axisLine={false} tickLine={false} width={52}
                 domain={['auto', 'auto']} tickFormatter={fmtTick} />
@@ -328,7 +376,7 @@ function CategoryBlock({ categoryName, categoryType = 'mixed', categoryData = []
       <div className="sticky top-[93px] z-30 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700 px-6 md:px-8 py-3 flex items-center gap-3 shadow-sm rounded-t-3xl overflow-hidden">
         <span className={`w-3.5 h-3.5 rounded-full flex-shrink-0 ${stickyDotColor}`} />
         <span className="text-xl font-black text-slate-800 dark:text-slate-100 truncate flex-1 tracking-tight">{categoryName}</span>
-        
+
         {presentAge !== null && (
           <div className="flex items-center gap-2 bg-indigo-50 dark:bg-indigo-900/30 px-3 py-1.5 rounded-xl border border-indigo-100 dark:border-indigo-800 shrink-0 shadow-sm">
             <TrendingUp className="w-3.5 h-3.5 text-indigo-500" />
@@ -408,7 +456,73 @@ function CategoryBlock({ categoryName, categoryType = 'mixed', categoryData = []
             {/* TRENDS */}
             {activeTab === 'trends' && (
               <div className="space-y-8">
-                {Object.keys(measuresByUnit).map(unit => renderPlot(unit, measuresByUnit[unit], filteredChartData))}
+                {categoryType === 'mixed' ? (() => {
+                  // ── MIXED CATEGORY: split into plant rows and soil rows ──
+                  // Plant rows = rows that have a valid CropStartDate (days_from_start >= 0)
+                  // Soil rows  = rows that do not have a crop start date
+                  const plantRows = filteredChartData.filter(d => d.days_from_start != null && d.days_from_start >= 0);
+                  const soilRows = filteredChartData.filter(d => d.days_from_start == null || d.days_from_start < 0);
+
+                  // For plant rows: sort by ageDays, deduplicate by ageDays
+                  const plantData = (() => {
+                    const sorted = [...plantRows].sort((a, b) => (a.ageDays || 0) - (b.ageDays || 0));
+                    const seen = new Set();
+                    return sorted.filter(row => { const k = row.ageDays; if (seen.has(k)) return false; seen.add(k); return true; });
+                  })();
+
+                  // For soil rows: sort by date, deduplicate by full date key
+                  const soilData = (() => {
+                    const sorted = [...soilRows].sort((a, b) => new Date(parseDatePart(a.date)) - new Date(parseDatePart(b.date)));
+                    const seen = new Set();
+                    return sorted.filter(row => { const k = row.date; if (seen.has(k)) return false; seen.add(k); return true; });
+                  })();
+
+                  return (
+                    <>
+                      {/* ── Plant sub-chart section ── */}
+                      {plantData.length > 0 && (
+                        <div>
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
+                            <span className="text-[11px] font-black text-emerald-600 uppercase tracking-widest">Plant Samples — X-Axis: Crop Age (Days)</span>
+                          </div>
+                          {Object.keys(buildMeasuresByUnit(visibleSummaryData)).map(unit => {
+                            const measures = buildMeasuresByUnit(visibleSummaryData)[unit];
+                            const localData = plantData.filter(row => measures.some(m => row[m.measure] != null));
+                            if (localData.length === 0) return null;
+                            return renderPlot(unit, measures, localData, 'plant');
+                          })}
+                        </div>
+                      )}
+
+                      {/* ── Soil sub-chart section ── */}
+                      {soilData.length > 0 && (
+                        <div className={plantData.length > 0 ? 'mt-10' : ''}>
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="w-2.5 h-2.5 rounded-full bg-amber-500" />
+                            <span className="text-[11px] font-black text-amber-600 uppercase tracking-widest">Soil Samples — X-Axis: Sample Date</span>
+                          </div>
+                          {Object.keys(buildMeasuresByUnit(visibleSummaryData)).map(unit => {
+                            const measures = buildMeasuresByUnit(visibleSummaryData)[unit];
+                            const localData = soilData.filter(row => measures.some(m => row[m.measure] != null));
+                            if (localData.length === 0) return null;
+                            return renderPlot(unit, measures, localData, 'soil');
+                          })}
+                        </div>
+                      )}
+
+                      {plantData.length === 0 && soilData.length === 0 && (
+                        <div className="py-20 text-center text-slate-400 font-bold uppercase text-sm">No data available for this category.</div>
+                      )}
+                    </>
+                  );
+                })()
+                  : Object.keys(measuresByUnit).map(unit => {
+                      const measures = measuresByUnit[unit];
+                      const localData = filteredChartData.filter(row => measures.some(m => row[m.measure] != null));
+                      if (localData.length === 0) return null;
+                      return renderPlot(unit, measures, localData);
+                  })}
               </div>
             )}
 
@@ -578,11 +692,11 @@ function CategoryBlock({ categoryName, categoryType = 'mixed', categoryData = []
                                         <div className="flex flex-col">
                                           <span className="text-[13px] font-bold text-slate-800 dark:text-slate-200">{measureLabel(m.key)}</span>
                                           <div className="flex items-center gap-1.5 mt-0.5">
-                                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Avg at Age: {m.historical?.toFixed(2)}{unit}</span>
+                                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Average: {m.historical?.toFixed(2)}{" "}{unit}</span>
                                             {m.median != null && (
                                               <>
                                                 <span className="text-slate-300">·</span>
-                                                <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Median: {m.median.toFixed(2)}</span>
+                                                <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Median: {m.median.toFixed(2)}{" "}{unit}</span>
                                               </>
                                             )}
                                           </div>
@@ -639,6 +753,9 @@ export default function Dashboard() {
   const [selectedCrop, setSelectedCrop] = useState('');
   const [selectedSoil, setSelectedSoil] = useState('');
 
+  const [companies, setCompanies] = useState(['All Companies']);
+  const [selectedCompany, setSelectedCompany] = useState('All Companies');
+
   // Dropdown multiple category handling
   const [allCategories] = useState(ALL_STATIC_CATEGORIES);
   const [selectedCategories, setSelectedCategories] = useState(['pH + O.S.', 'N-min 0-90 cm']); // Defaults
@@ -677,11 +794,11 @@ export default function Dashboard() {
 
   // Handle mutual exclusivity of filters
   // Soil type is NEVER blocked — plant analysis still depends on the soil field
-  useEffect(() => {
-    if (selectionProfile.isExclusivelySoil) {
-      if (selectedCrop !== 'All Crops') setSelectedCrop('All Crops');
-    }
-  }, [selectionProfile, selectedCrop]);
+  // useEffect(() => {
+  //   if (selectionProfile.isExclusivelySoil) {
+  //     if (selectedCrop !== 'All Crops') setSelectedCrop('All Crops');
+  //   }
+  // }, [selectionProfile, selectedCrop]);
 
   // Handle click outside for dropdown
   useEffect(() => {
@@ -702,6 +819,10 @@ export default function Dashboard() {
       if (data.crops.length) setSelectedCrop(data.crops[0]);
       if (data.soil_types.length) setSelectedSoil(data.soil_types[0]);
     }).catch(console.error);
+
+    getCompanies().then(comps => {
+      setCompanies(comps);
+    }).catch(console.error);
   }, []);
 
   useEffect(() => {
@@ -716,10 +837,10 @@ export default function Dashboard() {
     const catQuery = selectedCategories.join(',');
 
     Promise.all([
-      getTimeSeriesData(selectedCrop, selectedSoil, catQuery, null),
-      getSummaryStats(selectedCrop, selectedSoil, catQuery, null),
-      getDateRange(selectedCrop, selectedSoil),
-      getBenchmarks(selectedCrop, selectedSoil, catQuery),
+      getTimeSeriesData(selectedCrop, selectedSoil, catQuery, null, selectedCompany),
+      getSummaryStats(selectedCrop, selectedSoil, catQuery, null, selectedCompany),
+      getDateRange(selectedCrop, selectedSoil, selectedCompany),
+      getBenchmarks(selectedCrop, selectedSoil, catQuery, selectedCompany),
     ]).then(([tData, sData, dateRange, bData]) => {
 
       const tGroups = {};
@@ -739,7 +860,7 @@ export default function Dashboard() {
       setCropDateRange(dateRange);
       setSelectedWindow('All');
     }).catch(console.error).finally(() => setLoading(false));
-  }, [selectedCrop, selectedSoil, selectedCategories]);
+  }, [selectedCrop, selectedSoil, selectedCategories, selectedCompany]);
 
   const availableWindows = useMemo(() => {
     if (!Array.isArray(cropDateRange) || cropDateRange.length === 0) return [];
@@ -825,7 +946,7 @@ export default function Dashboard() {
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-0.5 flex items-center gap-1"><LineChartIcon className="w-3 h-3" /> Chart Type</label>
                 <div className="relative">
                   <select value={plotType} onChange={e => setPlotType(e.target.value)}
-                    className="appearance-none h-[40px] bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 pl-3 pr-8 rounded-xl focus:outline-none focus:ring-2 focus:ring-slate-200 font-bold cursor-pointer text-[13px] transition-colors">
+                    className="appearance-none h-[40px] bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 pl-3 pr-12 rounded-xl focus:outline-none focus:ring-2 focus:ring-slate-200 font-bold cursor-pointer text-[13px] transition-colors">
                     <option value="line">Line</option><option value="bar">Bar</option><option value="area">Area</option>
                   </select>
                   <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
@@ -868,6 +989,20 @@ export default function Dashboard() {
                     {filters.soil_types.map(s => <option key={s} value={s}>{s}</option>)}
                   </select>
                   <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-amber-500" />
+                </div>
+              </div>
+
+              {/* Company */}
+              <div className="flex flex-col gap-1 w-[130px] shrink-0">
+                <label className="text-[10px] font-black text-blue-600 uppercase tracking-widest px-0.5 flex items-center gap-1">
+                  Company
+                </label>
+                <div className="relative">
+                  <select value={selectedCompany} onChange={e => setSelectedCompany(e.target.value)}
+                    className="appearance-none h-[40px] w-full bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700 text-blue-800 dark:text-blue-300 pl-3 pr-8 rounded-xl focus:outline-none font-bold cursor-pointer text-[13px] transition-colors">
+                    {companies.map(c => <option key={c} value={c}>{c === 'All Companies' ? c : `ID: ${c}`}</option>)}
+                  </select>
+                  <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-blue-500" />
                 </div>
               </div>
 

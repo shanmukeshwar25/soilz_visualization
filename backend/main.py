@@ -82,6 +82,14 @@ def get_filters():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/companies")
+def get_companies():
+    try:
+        return data_processing.get_companies()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/categories")
 def get_categories(
     crop: str = Query(..., description="Crop Name"),
@@ -130,9 +138,10 @@ def get_data(
     soil:       str           = Query(...,  description="Soil Type"),
     categories: Optional[str] = Query(None, description="Comma separated categories filter"),
     type:       Optional[str] = Query(None, description="Category type filter (plant/soil)"),
+    company:    Optional[str] = Query(None, description="Company ID filter"),
 ):
     try:
-        data = data_processing.get_time_series_data(crop, soil, categories, type)
+        data = data_processing.get_time_series_data(crop, soil, categories, type, company)
         return {"data": data}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -144,9 +153,10 @@ def get_summary(
     soil:       str           = Query(...,  description="Soil Type"),
     categories: Optional[str] = Query(None, description="Comma separated categories filter"),
     type:       Optional[str] = Query(None, description="Category type filter (plant/soil)"),
+    company:    Optional[str] = Query(None, description="Company ID filter"),
 ):
     try:
-        summary = data_processing.get_summary_stats(crop, soil, categories, type)
+        summary = data_processing.get_summary_stats(crop, soil, categories, type, company)
         return {"summary": summary}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -154,23 +164,25 @@ def get_summary(
 
 @app.get("/date-range")
 def get_date_range(
-    crop: str = Query(...),
-    soil: str = Query(...),
+    crop:    str           = Query(...),
+    soil:    str           = Query(...),
+    company: Optional[str] = Query(None, description="Company ID filter"),
 ):
     try:
-        return data_processing.get_date_range(crop, soil)
+        return data_processing.get_date_range(crop, soil, company)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/benchmarks")
 def get_benchmarks(
-    crop: str = Query(..., description="Crop Name"),
-    soil: str = Query(..., description="Soil Type"),
+    crop:       str           = Query(..., description="Crop Name"),
+    soil:       str           = Query(..., description="Soil Type"),
     categories: Optional[str] = Query(None, description="Comma separated categories filter"),
+    company:    Optional[str] = Query(None, description="Company ID filter"),
 ):
     try:
-        return data_processing.get_age_benchmarks(crop, soil, categories)
+        return data_processing.get_age_benchmarks(crop, soil, categories, company)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
