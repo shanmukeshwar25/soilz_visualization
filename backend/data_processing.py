@@ -4,8 +4,8 @@ import os
 import io
 import re
 
-DATA_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'analysis_data_09-04-2026_2(in).csv')
-
+# DATA_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'analysis_data_09-04-2026_2(in).csv')
+DATA_PATH = os.getenv("DATA_PATH")
 # ── Category classification ───────────────────────────────────────────────────
 # Soil-related categories (fertilization, minerals, nutrients)
 SOIL_CATEGORIES = {
