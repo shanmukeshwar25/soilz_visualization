@@ -10,7 +10,7 @@ import {
   LineChart as LineChartIcon, LayoutDashboard, TrendingUp,
   Calendar, Moon, Sun, Tag, Search, CheckSquare, Square, ChevronDown
 } from 'lucide-react';
-import { getFilters, getCompanies, getTimeSeriesData, getSummaryStats, getDateRange, getAllCategories, getBenchmarks } from '../services/api';
+import { getFilters, getCompanies, getAreas, getTimeSeriesData, getSummaryStats, getDateRange, getAllCategories, getBenchmarks } from '../services/api';
 
 // ─── colour palette ────────────────────────────────────────────────────────────
 const COLORS = [
@@ -81,13 +81,28 @@ function parseDatePart(tick) {
   const s = String(tick), m = s.match(/(\d{4}-\d{2}-\d{2})/);
   return m ? m[1] : s.split(' ')[0];
 }
+
+function formatDateDDMMYYYY(dateString) {
+  if (!dateString || dateString === 'Unknown') return '';
+  const d = new Date(dateString);
+  if (isNaN(d.getTime())) return dateString;
+  const day = String(d.getDate()).padStart(2, '0');
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const year = d.getFullYear();
+  return `${day}-${month}-${year}`;
+}
+
 function formatTooltipLabel(tick) {
   if (!tick || typeof tick === 'number') return '';
   const s = String(tick), dp = parseDatePart(s);
   const bm = s.match(/\(Batch ([^)]+)\)/), batch = bm ? `  ·  Batch ${bm[1]}` : '';
   try {
     const d = new Date(dp), tp = s.split(' ')[1] || '';
-    return `Sampled: ${d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })} ${tp}${batch}`;
+    if (isNaN(d.getTime())) return s;
+    const day = String(d.getDate()).padStart(2, '0');
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const year = d.getFullYear();
+    return `Sampled: ${day}-${month}-${year} ${tp}${batch}`;
   } catch { return s; }
 }
 
@@ -99,6 +114,89 @@ function LayersSVG({ className = '' }) {
       <path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65" />
       <path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65" />
     </svg>
+  );
+}
+
+// ─── Searchable Dropdown ───────────────────────────────────────────────────────
+function SearchableDropdown({ value, onChange, options, placeholder = 'Search…', accentClass = 'purple', formatLabel, id }) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const ref = useRef(null);
+  const inputRef = useRef(null);
+
+  // colour map
+  const accent = {
+    purple: { btn: 'bg-purple-50 dark:bg-purple-900/30 border-purple-200 dark:border-purple-700 text-purple-800 dark:text-purple-300', chevron: 'text-purple-500', ring: 'focus:ring-purple-300', input: 'focus:border-purple-400', hover: 'hover:bg-purple-50 dark:hover:bg-purple-900/20', selected: 'bg-purple-100 dark:bg-purple-900/40 text-purple-800 dark:text-purple-200 font-black' },
+    blue:   { btn: 'bg-blue-50 dark:bg-blue-900/30 border-blue-200 dark:border-blue-700 text-blue-800 dark:text-blue-300',     chevron: 'text-blue-500',   ring: 'focus:ring-blue-300',   input: 'focus:border-blue-400',   hover: 'hover:bg-blue-50 dark:hover:bg-blue-900/20',   selected: 'bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-200 font-black'   },
+  }[accentClass] ?? {};
+
+  const filtered = options.filter(o => {
+    const label = formatLabel ? formatLabel(o) : o;
+    return label.toLowerCase().includes(query.toLowerCase());
+  });
+
+  // Close on outside click
+  useEffect(() => {
+    function handler(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false); }
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  // Focus input when opened
+  useEffect(() => { if (open) setTimeout(() => inputRef.current?.focus(), 60); }, [open]);
+
+  const displayLabel = formatLabel ? formatLabel(value) : value;
+
+  return (
+    <div className="relative" ref={ref} id={id}>
+      <button
+        type="button"
+        onClick={() => { setOpen(o => !o); setQuery(''); }}
+        className={`w-full h-[40px] flex items-center justify-between px-3 rounded-xl border-2 font-bold text-[13px] transition-all ${accent.btn}`}
+      >
+        <span className="truncate pr-1">{displayLabel}</span>
+        <ChevronDown className={`w-4 h-4 flex-shrink-0 transition-transform ${open ? 'rotate-180' : ''} ${accent.chevron}`} />
+      </button>
+
+      {open && (
+        <div className="absolute top-full left-0 mt-1.5 w-[220px] bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-2xl rounded-2xl z-[200] overflow-hidden flex flex-col">
+          {/* Search input */}
+          <div className="p-2 border-b border-slate-100 dark:border-slate-800">
+            <div className="relative">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
+              <input
+                ref={inputRef}
+                type="text"
+                value={query}
+                onChange={e => setQuery(e.target.value)}
+                placeholder={placeholder}
+                className={`w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg pl-8 pr-3 py-1.5 text-[12px] font-bold text-slate-700 dark:text-slate-300 outline-none ${accent.input} focus:ring-2 ${accent.ring} transition-all placeholder:font-normal`}
+              />
+            </div>
+          </div>
+
+          {/* Options list */}
+          <div className="overflow-y-auto max-h-[240px] py-1">
+            {filtered.length === 0 ? (
+              <div className="px-4 py-3 text-[12px] text-slate-400 font-bold text-center">No results found</div>
+            ) : filtered.map(o => {
+              const label = formatLabel ? formatLabel(o) : o;
+              const isSelected = o === value;
+              return (
+                <button
+                  key={o}
+                  type="button"
+                  onClick={() => { onChange(o); setOpen(false); setQuery(''); }}
+                  className={`w-full text-left px-4 py-2 text-[13px] font-bold transition-colors ${isSelected ? accent.selected : `text-slate-700 dark:text-slate-300 ${accent.hover}`}`}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -130,9 +228,9 @@ function CustomTooltip({ active, payload, label, unit }) {
         )}
         {d.CropStartDate && d.CropEndDate && (
           <div className="mt-1 flex items-center gap-1.5 font-bold text-[11px] text-slate-500 flex-wrap">
-            <span className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded-md">Planted: {d.CropStartDate}</span>
+            <span className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded-md">Planted: {formatDateDDMMYYYY(d.CropStartDate)}</span>
             <span className="text-slate-300">→</span>
-            <span className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded-md">End: {d.CropEndDate}</span>
+            <span className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded-md">End: {formatDateDDMMYYYY(d.CropEndDate)}</span>
           </div>
         )}
       </div>
@@ -165,28 +263,22 @@ function CategoryBlock({ categoryName, categoryType = 'mixed', categoryData = []
 
   const filteredChartData = useMemo(() => {
     let res = applyWindowFilter(categoryData, selectedWindow, availableWindows).map(d => ({ ...d }));
-    let minDt = Infinity;
-    res.forEach(d => {
-      const dp = parseDatePart(d.date);
+
+    res.forEach(row => {
+      const dp = parseDatePart(row.date);
       if (dp) {
-        const ms = new Date(dp).getTime();
-        if (ms && ms < minDt) minDt = ms;
+        try {
+          row.dateLabel = formatDateDDMMYYYY(dp);
+        } catch { row.dateLabel = dp; }
+      } else {
+        row.dateLabel = '';
       }
+      
+      // Use the actual days from planting as provided by the backend
+      row.ageDays = (row.days_from_start != null && row.days_from_start >= 0) ? row.days_from_start : 0;
     });
-    if (minDt !== Infinity) {
-      res.forEach(row => {
-        const dp = parseDatePart(row.date);
-        if (dp) {
-          const ms = new Date(dp).getTime();
-          row.ageDays = Math.floor((ms - minDt) / (1000 * 60 * 60 * 24));
-          try {
-            row.dateLabel = new Date(dp).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' });
-          } catch { row.dateLabel = dp; }
-        } else {
-          row.ageDays = 0;
-          row.dateLabel = '';
-        }
-      });
+
+    if (res.length > 0) {
       if (isSoilCategory) {
         res.sort((a, b) => new Date(parseDatePart(a.date)) - new Date(parseDatePart(b.date)));
         // For soil: deduplicate by the full date+batch string to keep all distinct samples
@@ -323,6 +415,10 @@ function CategoryBlock({ categoryName, categoryType = 'mixed', categoryData = []
       return <Line key={m.measure} type="monotone" dataKey={m.measure} yAxisId="left" stroke={m.color} strokeWidth={2.5} connectNulls isAnimationActive={false} dot={{ r: 4, fill: m.color, stroke: '#fff', strokeWidth: 2 }} activeDot={{ r: 7, fill: m.color, stroke: '#fff', strokeWidth: 2 }} />;
     });
 
+    const rowWithDates = data.find(d => d.CropStartDate && d.CropStartDate !== 'Unknown' && d.CropEndDate && d.CropEndDate !== 'Unknown');
+    const cropStartDate = rowWithDates ? formatDateDDMMYYYY(rowWithDates.CropStartDate) : null;
+    const cropEndDate = rowWithDates ? formatDateDDMMYYYY(rowWithDates.CropEndDate) : null;
+
     return (
       <div key={`${unit}-${xMode}`} className="w-full border border-slate-200 dark:border-slate-700 rounded-2xl bg-white dark:bg-slate-900 mt-6 overflow-hidden shadow-sm">
         {/* ── Chart Header ── */}
@@ -337,6 +433,15 @@ function CategoryBlock({ categoryName, categoryType = 'mixed', categoryData = []
             <span className="text-[11px] font-bold text-slate-400 dark:text-slate-500">
               · X-Axis: <span className="text-slate-600 dark:text-slate-400">{xLabel}</span>
             </span>
+            {cropStartDate && cropEndDate && (
+               <div className="ml-auto flex items-center gap-1.5 font-bold text-[11px] text-slate-500 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 px-3 py-1 rounded-full shadow-sm">
+                 <span className="text-slate-400 uppercase tracking-widest text-[9px]">Planted:</span>
+                 <span className="text-slate-700 dark:text-slate-300">{cropStartDate}</span>
+                 <span className="text-slate-300 mx-1">→</span>
+                 <span className="text-slate-400 uppercase tracking-widest text-[9px]">End:</span>
+                 <span className="text-slate-700 dark:text-slate-300">{cropEndDate}</span>
+               </div>
+            )}
           </div>
         </div>
         {/* ── Chart Body ── */}
@@ -531,7 +636,7 @@ function CategoryBlock({ categoryName, categoryType = 'mixed', categoryData = []
               const allEntries = filteredChartData.map(row => {
                 const raw = String(row.date);
                 const dm = raw.match(/(\d{4}-\d{2}-\d{2})/), tm = raw.match(/\d{4}-\d{2}-\d{2} (\d{2}:\d{2})/), bm = raw.match(/\(Batch ([^)]+)\)/);
-                const dateStr = dm ? new Date(dm[1]).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : raw;
+                const dateStr = dm ? formatDateDDMMYYYY(dm[1]) : raw;
                 const batchId = bm ? bm[1] : 'Unknown';
                 return { value: row.date, label: `Batch ${batchId}  ·  ${dateStr}${tm ? '  ' + tm[1] : ''}`, batchId };
               });
@@ -756,6 +861,9 @@ export default function Dashboard() {
   const [companies, setCompanies] = useState(['All Companies']);
   const [selectedCompany, setSelectedCompany] = useState('All Companies');
 
+  const [areas, setAreas] = useState(['All Areas']);
+  const [selectedArea, setSelectedArea] = useState('All Areas');
+
   // Dropdown multiple category handling
   const [allCategories] = useState(ALL_STATIC_CATEGORIES);
   const [selectedCategories, setSelectedCategories] = useState(['pH + O.S.', 'N-min 0-90 cm']); // Defaults
@@ -825,6 +933,14 @@ export default function Dashboard() {
     }).catch(console.error);
   }, []);
 
+  // Reload areas whenever the selected company changes
+  useEffect(() => {
+    setSelectedArea('All Areas');
+    getAreas(selectedCompany).then(areaList => {
+      setAreas(areaList);
+    }).catch(() => setAreas(['All Areas']));
+  }, [selectedCompany]);
+
   useEffect(() => {
     if (!selectedCrop || !selectedSoil || selectedCategories.length === 0) {
       setCategoryDataGroups({});
@@ -837,10 +953,10 @@ export default function Dashboard() {
     const catQuery = selectedCategories.join(',');
 
     Promise.all([
-      getTimeSeriesData(selectedCrop, selectedSoil, catQuery, null, selectedCompany),
-      getSummaryStats(selectedCrop, selectedSoil, catQuery, null, selectedCompany),
-      getDateRange(selectedCrop, selectedSoil, selectedCompany),
-      getBenchmarks(selectedCrop, selectedSoil, catQuery, selectedCompany),
+      getTimeSeriesData(selectedCrop, selectedSoil, catQuery, null, selectedCompany, selectedArea),
+      getSummaryStats(selectedCrop, selectedSoil, catQuery, null, selectedCompany, selectedArea),
+      getDateRange(selectedCrop, selectedSoil, selectedCompany, selectedArea),
+      getBenchmarks(selectedCrop, selectedSoil, catQuery, selectedCompany, selectedArea),
     ]).then(([tData, sData, dateRange, bData]) => {
 
       const tGroups = {};
@@ -860,7 +976,7 @@ export default function Dashboard() {
       setCropDateRange(dateRange);
       setSelectedWindow('All');
     }).catch(console.error).finally(() => setLoading(false));
-  }, [selectedCrop, selectedSoil, selectedCategories, selectedCompany]);
+  }, [selectedCrop, selectedSoil, selectedCategories, selectedCompany, selectedArea]);
 
   const availableWindows = useMemo(() => {
     if (!Array.isArray(cropDateRange) || cropDateRange.length === 0) return [];
@@ -993,17 +1109,45 @@ export default function Dashboard() {
               </div>
 
               {/* Company */}
-              <div className="flex flex-col gap-1 w-[130px] shrink-0">
+              <div className="flex flex-col gap-1 w-[155px] shrink-0">
                 <label className="text-[10px] font-black text-blue-600 uppercase tracking-widest px-0.5 flex items-center gap-1">
                   Company
+                  {selectedCompany !== 'All Companies' && (
+                    <span className="ml-auto text-blue-600 bg-blue-100 dark:bg-blue-900/40 px-2 py-0.5 rounded-full font-black text-[10px]">
+                      #{selectedCompany}
+                    </span>
+                  )}
                 </label>
-                <div className="relative">
-                  <select value={selectedCompany} onChange={e => setSelectedCompany(e.target.value)}
-                    className="appearance-none h-[40px] w-full bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700 text-blue-800 dark:text-blue-300 pl-3 pr-8 rounded-xl focus:outline-none font-bold cursor-pointer text-[13px] transition-colors">
-                    {companies.map(c => <option key={c} value={c}>{c === 'All Companies' ? c : `ID: ${c}`}</option>)}
-                  </select>
-                  <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-blue-500" />
-                </div>
+                <SearchableDropdown
+                  id="company-selector"
+                  value={selectedCompany}
+                  onChange={setSelectedCompany}
+                  options={companies}
+                  placeholder="Search company ID…"
+                  accentClass="blue"
+                  formatLabel={c => c === 'All Companies' ? 'All Companies' : `Company ${c}`}
+                />
+              </div>
+
+              {/* Area */}
+              <div className="flex flex-col gap-1 w-[155px] shrink-0">
+                <label className="text-[10px] font-black text-purple-600 uppercase tracking-widest px-0.5 flex items-center gap-1">
+                  <LayersSVG className="text-purple-500" /> Area
+                  {selectedArea !== 'All Areas' && (
+                    <span className="ml-auto text-purple-600 bg-purple-100 dark:bg-purple-900/40 px-2 py-0.5 rounded-full font-black text-[10px]">
+                      #{selectedArea}
+                    </span>
+                  )}
+                </label>
+                <SearchableDropdown
+                  id="area-selector"
+                  value={selectedArea}
+                  onChange={setSelectedArea}
+                  options={areas}
+                  placeholder="Search area number…"
+                  accentClass="purple"
+                  formatLabel={a => a === 'All Areas' ? 'All Areas' : `Area ${a}`}
+                />
               </div>
 
               {/* Dark mode toggle */}

@@ -12,7 +12,14 @@ export const getCompanies = async () => {
   return response.data.companies || [];
 };
 
-export const getTimeSeriesData = async (crop, soil, categories = null, type = null, company = null) => {
+export const getAreas = async (company = null) => {
+  const params = {};
+  if (company && company !== 'All Companies') params.company = company;
+  const response = await axios.get(`${API_BASE_URL}/areas`, { params });
+  return response.data.areas || ['All Areas'];
+};
+
+export const getTimeSeriesData = async (crop, soil, categories = null, type = null, company = null, area = null) => {
   const params = { crop, soil };
   if (categories && categories.length > 0) {
     if (Array.isArray(categories)) {
@@ -23,11 +30,12 @@ export const getTimeSeriesData = async (crop, soil, categories = null, type = nu
   }
   if (type) params.type = type;
   if (company && company !== 'All Companies') params.company = company;
+  if (area && area !== 'All Areas') params.area = area;
   const response = await axios.get(`${API_BASE_URL}/data`, { params });
   return response.data.data;
 };
 
-export const getSummaryStats = async (crop, soil, categories = null, type = null, company = null) => {
+export const getSummaryStats = async (crop, soil, categories = null, type = null, company = null, area = null) => {
   const params = { crop, soil };
   if (categories && categories.length > 0) {
     if (Array.isArray(categories)) {
@@ -38,13 +46,15 @@ export const getSummaryStats = async (crop, soil, categories = null, type = null
   }
   if (type) params.type = type;
   if (company && company !== 'All Companies') params.company = company;
+  if (area && area !== 'All Areas') params.area = area;
   const response = await axios.get(`${API_BASE_URL}/summary`, { params });
   return response.data.summary;
 };
 
-export const getDateRange = async (crop, soil, company = null) => {
+export const getDateRange = async (crop, soil, company = null, area = null) => {
   const params = { crop, soil };
   if (company && company !== 'All Companies') params.company = company;
+  if (area && area !== 'All Areas') params.area = area;
   const response = await axios.get(`${API_BASE_URL}/date-range`, { params });
   return response.data.windows || [];
 };
@@ -75,7 +85,7 @@ export const getPlantTrajectory = async (crop, soil) => {
   return response.data;
 };
 
-export const getBenchmarks = async (crop, soil, categories = null, company = null) => {
+export const getBenchmarks = async (crop, soil, categories = null, company = null, area = null) => {
   const params = { crop, soil };
   if (categories && categories.length > 0) {
     if (Array.isArray(categories)) {
@@ -85,6 +95,7 @@ export const getBenchmarks = async (crop, soil, categories = null, company = nul
     }
   }
   if (company && company !== 'All Companies') params.company = company;
+  if (area && area !== 'All Areas') params.area = area;
   const response = await axios.get(`${API_BASE_URL}/benchmarks`, { params });
   return response.data;
 };

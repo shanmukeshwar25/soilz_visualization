@@ -123,6 +123,17 @@ def _apply_company_filter(df: pd.DataFrame, company: str) -> pd.DataFrame:
     except (ValueError, TypeError):
         return df
 
+
+def _apply_area_filter(df: pd.DataFrame, area: str) -> pd.DataFrame:
+    """Filter dataframe by AreaId string, if provided."""
+    if not area or area == 'All Areas':
+        return df
+    try:
+        aid = int(area)
+        return df[df['AreaId'] == aid]
+    except (ValueError, TypeError):
+        return df
+
 def load_and_clean_data(csv_path: str) -> pd.DataFrame:
     """Loads and preprocesses the soil dataset."""
     df = _read_custom_csv(csv_path)
@@ -167,10 +178,15 @@ def load_and_clean_data(csv_path: str) -> pd.DataFrame:
     if 'BatchId' not in df.columns:
         df['BatchId'] = 'Unknown'
 
-    # Preserve CompanyId for filtering
+    # Preserve CompanyId and AreaId for filtering
     if 'CompanyId' not in df.columns:
         df['CompanyId'] = pd.NA
     df['CompanyId'] = pd.to_numeric(df['CompanyId'], errors='coerce')
+
+    if 'AreaId' not in df.columns:
+        df['AreaId'] = pd.NA
+    df['AreaId'] = pd.to_numeric(df['AreaId'], errors='coerce')
+
     df['BatchId'] = df['BatchId'].fillna('Unknown')
 
     # Ensure Category column exists
@@ -201,7 +217,7 @@ def load_and_clean_data(csv_path: str) -> pd.DataFrame:
     df['HasSoilData']  = df['SoilType'].notna().astype(int)
 
     # Aggregate to handle exact measure duplicates within the SAME batch
-    # Category, HasPlantData, HasSoilData are preserved; CompanyId kept via first()
+    # Category, HasPlantData, HasSoilData are preserved; CompanyId/AreaId kept via first()
     agg_df = df.groupby([
         'Crop', 'SoilType', 'CreatedDate', 'BatchId',
         'CropStartDate', 'CropEndDate', 'Category', 'Measure', 'days_from_start'
@@ -211,6 +227,7 @@ def load_and_clean_data(csv_path: str) -> pd.DataFrame:
         'HasSoilData':  'max',
         'UnitS':        'first',
         'CompanyId':    'first',
+        'AreaId':       'first',
     }).reset_index()
 
     # Sort properly
@@ -241,6 +258,16 @@ def get_companies():
     ids = sorted(df['CompanyId'].dropna().astype(int).unique().tolist())
     return {
         "companies": ["All Companies"] + [str(i) for i in ids]
+    }
+
+
+def get_areas(company: str = None):
+    """Returns all distinct AreaIds for the given company (or all if no company given)."""
+    df = get_data()
+    sub = _apply_company_filter(df, company)
+    ids = sorted(sub['AreaId'].dropna().astype(int).unique().tolist())
+    return {
+        "areas": ["All Areas"] + [str(i) for i in ids]
     }
 
 
@@ -278,7 +305,7 @@ def get_categories(crop: str, soil: str, cat_type: str = None):
     }
 
 
-def get_time_series_data(crop: str, soil: str, categories: str = None, cat_type: str = None, company: str = None):
+def get_time_series_data(crop: str, soil: str, categories: str = None, cat_type: str = None, company: str = None, area: str = None):
     df = get_data()
     sub_df = df.copy()
     if crop and crop != 'All Crops':
@@ -286,6 +313,7 @@ def get_time_series_data(crop: str, soil: str, categories: str = None, cat_type:
     if soil and soil != 'All Soils':
         sub_df = sub_df[sub_df['SoilType'] == soil]
     sub_df = _apply_company_filter(sub_df, company)
+    sub_df = _apply_area_filter(sub_df, area)
 
     if categories and categories != 'All':
         cats_list = [c.strip() for c in categories.split(',')]
@@ -317,7 +345,7 @@ def get_time_series_data(crop: str, soil: str, categories: str = None, cat_type:
     return pivot_df.to_dict(orient='records')
 
 
-def get_summary_stats(crop: str, soil: str, categories: str = None, cat_type: str = None, company: str = None):
+def get_summary_stats(crop: str, soil: str, categories: str = None, cat_type: str = None, company: str = None, area: str = None):
     df = get_data()
     sub_df = df.copy()
     if crop and crop != 'All Crops':
@@ -325,6 +353,7 @@ def get_summary_stats(crop: str, soil: str, categories: str = None, cat_type: st
     if soil and soil != 'All Soils':
         sub_df = sub_df[sub_df['SoilType'] == soil]
     sub_df = _apply_company_filter(sub_df, company)
+    sub_df = _apply_area_filter(sub_df, area)
 
     if categories and categories != 'All':
         cats_list = [c.strip() for c in categories.split(',')]
@@ -365,7 +394,7 @@ def get_summary_stats(crop: str, soil: str, categories: str = None, cat_type: st
     return summary
 
 
-def get_date_range(crop: str, soil: str, company: str = None):
+def get_date_range(crop: str, soil: str, company: str = None, area: str = None):
     """
     Build Timeline Focus dropdown options grouped by calendar year of actual samples.
     """
@@ -382,7 +411,12 @@ def get_date_range(crop: str, soil: str, company: str = None):
     if soil and soil != 'All Soils':
         sub = sub[sub['SoilType'] == soil]
     sub = _apply_company_filter(sub, company)
-        
+    if area and area != 'All Areas':
+        try:
+            sub = sub[sub['AreaId'] == int(area)]
+        except (ValueError, TypeError):
+            pass
+
     sub = sub.dropna(subset=['CreatedDate'])
 
     if sub.empty:
@@ -497,7 +531,7 @@ def get_plant_trajectory(crop: str, soil: str):
         "plant_categories_used": cats_used,
     }
 
-def get_age_benchmarks(crop: str, soil: str, categories: str = None, company: str = None):
+def get_age_benchmarks(crop: str, soil: str, categories: str = None, company: str = None, area: str = None):
     """
     Returns historical mean values for each measurement, grouped by (Category, days_from_start).
     This allows comparing a specific sample at Age X with the historical average at Age X.
@@ -513,6 +547,7 @@ def get_age_benchmarks(crop: str, soil: str, categories: str = None, company: st
     if soil and soil != 'All Soils':
         sub_df = sub_df[sub_df['SoilType'] == soil]
     sub_df = _apply_company_filter(sub_df, company)
+    sub_df = _apply_area_filter(sub_df, area)
 
     if categories and categories != 'All':
         cats_list = [c.strip() for c in categories.split(',')]
