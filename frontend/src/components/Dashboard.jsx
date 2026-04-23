@@ -19,52 +19,6 @@ const COLORS = [
   '#f43f5e', '#d946ef', '#0ea5e9', '#eab308', '#2dd4bf', '#fb923c',
 ];
 
-const ALL_STATIC_CATEGORIES = [
-  // PLANT RELATED
-  { name: 'Drogestof onderzoek plant', type: 'plant' },
-  { name: 'Drogestof onderzoek plant compleet', type: 'plant' },
-  { name: 'Vruchtanalyse Plus', type: 'plant' },
-  { name: 'Brix-waarde bepaling', type: 'plant' },
-
-  // SOIL RELATED
-  { name: 'N-min 0-90 cm', type: 'soil' },
-  { name: 'pH + O.S.', type: 'soil' },
-  { name: 'Verticilium onderzoek in grond', type: 'soil' },
-  { name: 'Beschikbare voorraad N + K', type: 'soil' },
-  { name: 'Stengelaaltjes', type: 'soil' },
-  { name: 'Longidorus en Xiphinema', type: 'soil' },
-  { name: 'N-Mineraal Totaal', type: 'soil' },
-  { name: 'Bemesting uitgebreid 0-90 cm', type: 'soil' },
-  { name: 'pH', type: 'soil' },
-  { name: 'Aaltjes + 28 dgn incubatie', type: 'soil' },
-
-  // MIXED / BOTH
-  { name: 'Bemesting Uitgebreid', type: 'mixed' },
-  { name: 'Aaltjes + 14 dgn Incubatie', type: 'mixed' },
-  { name: 'In de teelt bemesting - BASIS', type: 'mixed' },
-  { name: 'Aaltjes + 14 dgn incubatie + Cystenonderzoek', type: 'mixed' },
-  { name: 'In de teelt bemesting - UITGEBREID', type: 'mixed' },
-  { name: 'Bemesting Basis', type: 'mixed' },
-  { name: 'Tussentijdse rapportage Aaltjes', type: 'mixed' },
-  { name: 'Bemesting Uitgebreid + Fosfaatdifferentiatie', type: 'mixed' },
-  { name: 'Aaltjes - Zonder incubatie', type: 'mixed' },
-  { name: 'In de teelt bemesting - CHECKMONSTER', type: 'mixed' },
-  { name: 'N-mineraal', type: 'mixed' },
-  { name: 'Zware Metalen', type: 'mixed' },
-  { name: 'Wateronderzoek', type: 'mixed' },
-  { name: 'Plantsap monsters', type: 'mixed' },
-  { name: 'Fosfaatdifferentiatie', type: 'mixed' },
-  { name: 'Derogatie (veehouderij)', type: 'mixed' },
-  { name: 'Mestonderzoek (vast/vloeibaar)', type: 'mixed' },
-  { name: 'Scheurmonster grasland', type: 'mixed' },
-  { name: 'Bemesting uitgebreid + Klei/Zand/Silt verhouding', type: 'mixed' },
-  { name: 'Vrijwillig AM onderzoek', type: 'mixed' },
-  { name: 'Bietencysten onderzoek grond', type: 'mixed' },
-  { name: 'Bemesting basis + EC', type: 'mixed' },
-  { name: 'Fosfaatdifferentiatie + pH', type: 'mixed' },
-  { name: 'E-coli wateronderzoek', type: 'mixed' },
-  { name: 'Aaltjes zonder incubatie + Cysten', type: 'mixed' }
-];
 
 const MEASURE_LABELS = {
   'Opbrengst vers': 'Fresh Yield', 'Opbrengst droge stof': 'Dry Matter Yield',
@@ -865,8 +819,8 @@ export default function Dashboard() {
   const [selectedArea, setSelectedArea] = useState('All Areas');
 
   // Dropdown multiple category handling
-  const [allCategories] = useState(ALL_STATIC_CATEGORIES);
-  const [selectedCategories, setSelectedCategories] = useState(['pH + O.S.', 'N-min 0-90 cm']); // Defaults
+  const [allCategories, setAllCategories] = useState([]);
+  const [selectedCategories, setSelectedCategories] = useState([]); // Defaults
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const dropdownRef = useRef(null);
 
@@ -891,14 +845,7 @@ export default function Dashboard() {
     };
   }, [selectedCategories, allCategories]);
 
-  // Grouped Categories for Rendering
-  const groupedCategories = useMemo(() => {
-    return {
-      'Plant Related': allCategories.filter(c => c.type === 'plant'),
-      'Soil Related': allCategories.filter(c => c.type === 'soil'),
-      'Mixed / Multi-Purpose': allCategories.filter(c => c.type === 'mixed'),
-    };
-  }, [allCategories]);
+
 
   // Handle mutual exclusivity of filters
   // Soil type is NEVER blocked — plant analysis still depends on the soil field
@@ -930,6 +877,10 @@ export default function Dashboard() {
 
     getCompanies().then(comps => {
       setCompanies(comps);
+    }).catch(console.error);
+
+    getAllCategories().then(data => {
+      setAllCategories(data.categories || []);
     }).catch(console.error);
   }, []);
 
@@ -1023,7 +974,7 @@ export default function Dashboard() {
               {/* Categories multi-select */}
               <div className="flex flex-col gap-1.5 w-[220px] shrink-0" ref={dropdownRef}>
                 <label className="text-[10px] font-black text-indigo-500 flex items-center justify-between uppercase tracking-widest px-0.5">
-                  <span>Categories Tested</span>
+                  <span>Category</span>
                   <span className="text-indigo-600 bg-indigo-100 dark:bg-indigo-900/40 px-2 py-0.5 rounded-full font-black">{selectedCategories.length}</span>
                 </label>
                 <div className="relative">
@@ -1038,19 +989,14 @@ export default function Dashboard() {
                       <button onClick={() => setSelectedCategories(selectedCategories.length === allCategories.length ? [] : allCategories.map(c => c.name))} className="text-xs font-black text-indigo-600 uppercase tracking-widest mb-2 px-2 pb-2 border-b text-left hover:text-indigo-800 transition-colors">
                         {selectedCategories.length === allCategories.length ? 'Deselect All' : 'Select All Categories'}
                       </button>
-                      {Object.entries(groupedCategories).map(([groupName, categories]) => (
-                        <div key={groupName} className="mb-4 last:mb-0">
-                          <div className="px-2 py-1 mb-1 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] bg-slate-50 dark:bg-slate-800/50 rounded-lg">{groupName}</div>
-                          {categories.map(c => (
-                            <label key={c.name} className="flex items-start gap-3 cursor-pointer p-2 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-lg group select-none">
-                              <input type="checkbox" className="sr-only" checked={selectedCategories.includes(c.name)} onChange={() => toggleCategory(c.name)} />
-                              <div className="mt-0.5">
-                                {selectedCategories.includes(c.name) ? <CheckSquare className="w-5 h-5 text-indigo-500 flex-shrink-0" /> : <Square className="w-5 h-5 text-slate-300 group-hover:text-slate-400 flex-shrink-0" />}
-                              </div>
-                              <span className="text-[13px] font-bold text-slate-700 dark:text-slate-300 leading-tight">{c.name}</span>
-                            </label>
-                          ))}
-                        </div>
+                      {allCategories.map(c => (
+                        <label key={c.name} className="flex items-start gap-3 cursor-pointer p-2 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-lg group select-none">
+                          <input type="checkbox" className="sr-only" checked={selectedCategories.includes(c.name)} onChange={() => toggleCategory(c.name)} />
+                          <div className="mt-0.5">
+                            {selectedCategories.includes(c.name) ? <CheckSquare className="w-5 h-5 text-indigo-500 flex-shrink-0" /> : <Square className="w-5 h-5 text-slate-300 group-hover:text-slate-400 flex-shrink-0" />}
+                          </div>
+                          <span className="text-[13px] font-bold text-slate-700 dark:text-slate-300 leading-tight">{c.name}</span>
+                        </label>
                       ))}
                     </div>
                   )}

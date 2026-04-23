@@ -4,57 +4,9 @@ import os
 import io
 import re
 
-# DATA_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'analysis_data_09-04-2026_2(in).csv')
-DATA_PATH = os.getenv("DATA_PATH")
-# ── Category classification ───────────────────────────────────────────────────
-# Soil-related categories (fertilization, minerals, nutrients)
-SOIL_CATEGORIES = {
-    'N-min 0-90 cm',
-    'pH + O.S.',
-    'Verticilium onderzoek in grond',
-    'Beschikbare voorraad N + K',
-    'Stengelaaltjes',
-    'Longidorus en Xiphinema',
-    'N-Mineraal Totaal',
-    'Bemesting uitgebreid 0-90 cm',
-    'pH',
-    'Aaltjes + 28 dgn incubatie'
-}
 
-PLANT_CATEGORIES = {
-    'Drogestof onderzoek plant',
-    'Drogestof onderzoek plant compleet',
-    'Vruchtanalyse Plus',
-    'Brix-waarde bepaling'
-}
-
-MIXED_CATEGORIES = {
-    'Bemesting Uitgebreid',
-    'Aaltjes + 14 dgn Incubatie',
-    'In de teelt bemesting - BASIS',
-    'Aaltjes + 14 dgn incubatie + Cystenonderzoek',
-    'In de teelt bemesting - UITGEBREID',
-    'Bemesting Basis',
-    'Tussentijdse rapportage Aaltjes',
-    'Bemesting Uitgebreid + Fosfaatdifferentiatie',
-    'Aaltjes - Zonder incubatie',
-    'In de teelt bemesting - CHECKMONSTER',
-    'N-mineraal',
-    'Zware Metalen',
-    'Wateronderzoek',
-    'Plantsap monsters',
-    'Fosfaatdifferentiatie',
-    'Derogatie (veehouderij)',
-    'Mestonderzoek (vast/vloeibaar)',
-    'Scheurmonster grasland',
-    'Bemesting uitgebreid + Klei/Zand/Silt verhouding',
-    'Vrijwillig AM onderzoek',
-    'Bietencysten onderzoek grond',
-    'Bemesting basis + EC',
-    'Fosfaatdifferentiatie + pH',
-    'E-coli wateronderzoek',
-    'Aaltjes zonder incubatie + Cysten'
-}
+BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+DATA_PATH = os.path.join(BASE_DIR, "analysis_data_09-04-2026_2(in).csv")
 
 # Mapping of measures to correct units when they are missing from the dataset
 UNIT_MAPPING = {
@@ -82,23 +34,11 @@ UNIT_MAPPING = {
     'E. Coli': 'kve/100ml',
 }
 
+_CATEGORY_TYPES = {}
+
 def classify_category(cat: str) -> str:
-    """Returns 'soil', 'plant', or 'mixed' for a category string."""
-    if cat in SOIL_CATEGORIES:
-        return 'soil'
-    if cat in PLANT_CATEGORIES:
-        return 'plant'
-    if cat in MIXED_CATEGORIES:
-        return 'mixed'
-        
-    # Keyword fallback
-    c = str(cat).lower()
-    if any(k in c for k in ['bodem', 'grond', 'bemesting', 'ph', 'fosfaat', 'zand', 'klei', 'mineraal', 'ec', 'os', 'o.s.']):
-        return 'soil'
-    if any(k in c for k in ['plant', 'vrucht', 'gewas', 'sap', 'blad', 'brix', 'drogestof']):
-        return 'plant'
-        
-    return 'mixed'
+    """Returns 'soil', 'plant', or 'mixed' for a category string dynamically."""
+    return _CATEGORY_TYPES.get(cat, 'mixed')
 
 # Helper to read poorly quoted CSVs where the entire row is quoted
 def _read_custom_csv(filepath: str) -> pd.DataFrame:
@@ -137,6 +77,32 @@ def _apply_area_filter(df: pd.DataFrame, area: str) -> pd.DataFrame:
 def load_and_clean_data(csv_path: str) -> pd.DataFrame:
     """Loads and preprocesses the soil dataset."""
     df = _read_custom_csv(csv_path)
+
+    # Calculate dynamic category types based on actual dataset nulls before filling with Unknown
+    if 'Category' in df.columns:
+        df['Category'] = df['Category'].fillna('Unknown')
+        
+        def is_null(x):
+            return pd.isna(x) | (x == r'\N') | (x == 'Unknown') | (x == '')
+            
+        crop_col = 'Plant/Crop' if 'Plant/Crop' in df.columns else 'Crop'
+        soil_col = 'SoilType'
+        
+        if crop_col in df.columns and soil_col in df.columns:
+            res = df.groupby('Category').agg(
+                has_crop=(crop_col, lambda x: (~is_null(x)).any()),
+                has_soil=(soil_col, lambda x: (~is_null(x)).any())
+            )
+            
+            global _CATEGORY_TYPES
+            _CATEGORY_TYPES.clear()
+            for cat, row in res.iterrows():
+                if row['has_crop'] and not row['has_soil']:
+                    _CATEGORY_TYPES[cat] = 'plant'
+                elif row['has_soil'] and not row['has_crop']:
+                    _CATEGORY_TYPES[cat] = 'soil'
+                else:
+                    _CATEGORY_TYPES[cat] = 'mixed'
 
     # Drop rows where critical Date columns are missing
     df = df.dropna(subset=['CreatedDate', 'ValueS'])
@@ -275,13 +241,13 @@ def get_all_categories():
     """Returns all distinct categories with their type (soil/plant/other)."""
     df = get_data()
     all_cats = sorted(df['Category'].dropna().unique().tolist())
+    
+    categories = [{"name": c, "type": classify_category(c)} for c in all_cats]
+    
     return {
-        "categories": [
-            {"name": c, "type": classify_category(c)}
-            for c in all_cats
-        ],
-        "soil_categories": sorted(SOIL_CATEGORIES),
-        "plant_categories": sorted(PLANT_CATEGORIES),
+        "categories": categories,
+        "soil_categories": [c["name"] for c in categories if c["type"] == "soil"],
+        "plant_categories": [c["name"] for c in categories if c["type"] == "plant"],
     }
 
 
@@ -460,7 +426,7 @@ def get_soil_trajectory(crop: str, soil: str):
     if soil and soil != 'All Soils':
         sub = sub[sub['SoilType'] == soil]
         
-    sub = sub[sub['Category'].isin(SOIL_CATEGORIES)]
+    sub = sub[sub['Category'].apply(classify_category) == 'soil']
 
     if sub.empty:
         return {"data": [], "soil_categories_used": []}
@@ -502,7 +468,7 @@ def get_plant_trajectory(crop: str, soil: str):
     if soil and soil != 'All Soils':
         sub = sub[sub['SoilType'] == soil]
         
-    sub = sub[sub['Category'].isin(PLANT_CATEGORIES)]
+    sub = sub[sub['Category'].apply(classify_category) == 'plant']
 
     if sub.empty:
         return {"data": [], "plant_categories_used": []}
